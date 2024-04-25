@@ -1,0 +1,20 @@
+{
+  "name": "relayer_test",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@ethereumjs/tx": "^4.2.0",
+    "defender-relay-client": "^1.44.0",
+    "eth-sig-util": "^3.0.1",
+    "isomorphic-fetch": "^3.0.0",
+    "node-fetch": "^3.3.2",
+    "web3": "^4.0.3"
+  }
+}

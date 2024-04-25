@@ -1,0 +1,13 @@
+Options -MultiViews
+RewriteEngine On
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^(getById)/(.+)$ index.php?method=$1&id=$2 
+RewriteRule ^(getByRequest)/(.+)$ index.php?method=$1&request=$2 
+RewriteRule ^(getByTxHash)/(.+)$ index.php?method=$1&txHash=$2 
+RewriteRule ^(getByStatus)/(.+)$ index.php?method=$1&status=$2 
+RewriteRule ^(getByTimestamp)/(.+)$ index.php?method=$1&timestamp=$2 
+RewriteRule ^(getByFrom)/(.+)$ index.php?method=$1&from=$2 
+RewriteRule ^(getByNonce)/(.+)$ index.php?method=$1&nonce=$2 
+RewriteRule ^(getByEmailSent)/(.+)$ index.php?method=$1&emailSent=$2 
+RewriteRule ^(getByRetry)/(.+)$ index.php?method=$1&retry=$2 
+RewriteRule ^([a-zA-Z0-9]+)$ index.php?method=$1
