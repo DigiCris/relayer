@@ -178,7 +178,12 @@ function getFunctions($get) {
             $result = getByDateReported($get['dateReported']);
             debug('getByDateReported');
             break;
-            
+
+        case 'getByLowerOrderVal':
+            include_once "functions/read/getByLowerOrderVal.php";
+            $result = getByLowerOrderVal();
+            debug('getByLowerOrderVal');
+            break;
         default:
             $result['success']=false;
             $result['msg']='No valid get case selected';

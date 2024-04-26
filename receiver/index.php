@@ -6,10 +6,11 @@
     use SWeb3\Utils;
     use Web3\Contract;
 
+    define('ENV', parse_ini_file('.env'));  // Cargo el .env con variables de entorno
+
 /* TO DO
     3)verify y send adentro podrían hacer los retries o la logica para errores en los rpc
 */
-
 
     $sweb3 = -1;
     $nonce = -1; // se pone global para setearlo una sola vez y ahorrar llamados
@@ -47,11 +48,16 @@
             $from_address_private_key = getPrivateKey();
             $sweb3->setPersonalData($from_address, $from_address_private_key);
             $nonce = getNonce();
+
+            // TODO: Probar reintentos antes de cortar la ejecución. Probar con otro RPC si el primero falla.
         } catch (Exception $e) {
             // Capturar cualquier excepción ocurrida durante la ejecución
             $response["success"] = false;
             $response["msg"] = "error: We could not initialize: " . $e->getMessage();
-            return $response;
+
+            // Corto la ejecución si falla
+            echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            exit;
         }
     }
 
@@ -107,10 +113,69 @@
         Manda al emailAddress un email con el titulo en el asunto y el contenido adentro.
         Falta implementar. Pedirle a Nico.
         */
-        function email($emailAddress,$titulo,$contenido) {
-        $contenido["email"] = $emailAddress;
-        $contenido["title"] = $titulo;
-        echo json_encode($contenido, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    function email($emailAddress, $titulo, $contenido) {
+        // (1) Definición del correo y tomar parámetros del .env
+        $transactional_api_key = ENV['BREVO_API_KEY'];     // APIKEY
+        $template_id = ENV['BREVO_TEMPLATE_ID'];           // Templateid de la plantilla
+        $brevo_url = 'https://api.brevo.com/v3/smtp/email'; // Brevo email URL
+        $from = 'contacto@comunyt.co';                     // Campo from del email
+
+        // Campos del correo
+        $email_required_fields = json_encode([
+            // El que envía el correo
+            "sender" => [
+                "name" => "Comuny-T Relayer",
+                "email" => $from
+            ],
+
+            // Los parámetros, texto y título.
+            "params" => [
+                "title" => $titulo,
+                "text" => $contenido
+            ],
+
+            // A quién responder (brevo lo pide aunque no lo usemos)
+            "replyTo" => [
+                "name" => "Comuny-T Relayer",
+                "email" => $from
+            ],
+
+            // Para quién es el correo
+            "to" => [
+                [
+                    "email" => $emailAddress,
+                    "name" => "Administrador de Comuny-T Relayer"
+                ]
+            ],
+
+            // Id de la plantilla de brevo y el tag para identificar el tipo de correo
+            "templateId" => $template_id,
+            "tags" => [
+                "relayer"
+            ]
+        ]);
+
+        // (2) CURL para enviar el correo
+        $c = curl_init($brevo_url);
+                curl_setopt($c, CURLOPT_CUSTOMREQUEST, "POST");
+        curl_setopt($c, CURLOPT_POSTFIELDS, $email_required_fields);
+        curl_setopt($c, CURLOPT_RETURNTRANSFER, true);
+        curl_setopt($c, CURLOPT_HTTPHEADER, [ 
+            "accept: application/json", 
+            "api-key: $transactional_api_key",
+            "Content-Type: application/json"
+            ]
+        );
+
+        // (3) Tomo la respuesta y el http code
+        $brevo_response = json_decode(curl_exec($c), true);
+        $brevo_response['http_code'] = curl_getinfo($c, CURLINFO_HTTP_CODE);
+        curl_close($c);
+
+        return $brevo_response; 
+        // Brevo devuelve 201 o 202 como codigos de exitos. 
+        // Cualquier otro código será considerado como falla al enviar correo.
+        //echo json_encode($contenido, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     }
 
     function maxRetries() {
@@ -288,6 +353,10 @@
         $endpoint = ($endpoint["response"][0]["endpoint"]);
         print_r($endpoint);
         exit;*/
+
+        //TODO: Get lower order val
+        // $endpoint = get("https://comunyt.co/relayer/api/v1/relayerRPC/getByLowerOrderVal");
+        // $endpoint = $endpoint['response'][0]['endpoint'];
         return 'https://polygon-amoy-bor-rpc.publicnode.com';
     }
 
@@ -296,7 +365,7 @@
         Tiene que coincidir obviamente con private key de getPrivateKey().
         */
         function getFromAddress() {
-        return '';
+        return ENV['RELAYER_ADDRESS'];
     }
 
     /* getPrivateKey()
@@ -304,7 +373,7 @@
         Tiene que coincidir obviamente con el address de getFromAddress()
         */
         function getPrivateKey() {
-        return '';
+        return ENV['RELAYER_PRIVATE_KEY'];
     }
 
     /* createDataString($selector,$from,$to,$value,$gas,$nonce,$data,$signature)

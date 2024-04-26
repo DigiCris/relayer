@@ -815,6 +815,31 @@ class relayerRPC
         return $row;
     }
 
+    // TODO: Documentar
+    // Lee el RPC con el menor orderval
+    public function readByLowerOrderVal()
+    {
+        $query = 'SELECT * FROM relayerRPC ORDER BY orderVal ASC LIMIT 1';
+        $result = $this->base->prepare($query);
+        $result->execute();
+        $row = $result->fetchAll(PDO::FETCH_ASSOC);
+        $result->closeCursor();
+        if(!empty($row)){
+            foreach($row as $items => &$relayerRPC){
+                $relayerRPC['id'] = stripslashes(html_entity_decode($relayerRPC['id'])); 
+                $relayerRPC['endpoint'] = stripslashes(html_entity_decode($relayerRPC['endpoint'])); 
+                $relayerRPC['calls'] = stripslashes(html_entity_decode($relayerRPC['calls'])); 
+                $relayerRPC['frecuency'] = stripslashes(html_entity_decode($relayerRPC['frecuency'])); 
+                $relayerRPC['orderVal'] = stripslashes(html_entity_decode($relayerRPC['orderVal'])); 
+                $relayerRPC['miss'] = stripslashes(html_entity_decode($relayerRPC['miss'])); 
+                $relayerRPC['consecutiveMiss'] = stripslashes(html_entity_decode($relayerRPC['consecutiveMiss'])); 
+                $relayerRPC['dateReported'] = stripslashes(html_entity_decode($relayerRPC['dateReported'])); 
+            }
+        }
+        return $row;
+    }
+
+
 
 /*!
 * \brief    Deletes all rows in the database
