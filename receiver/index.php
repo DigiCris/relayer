@@ -70,7 +70,7 @@
             global $nonce;
             global $urlId;
             $urlId = $urlId++;          
-            $url = getRPC($urlId);
+            $url = getRPC($urlId);  //! No entiendo por qué usamos acá el urlId, si getRPC debe devolver el RPC con orderVal más bajo
                  
             $sweb3 = new SWeb3($url);
     
@@ -351,19 +351,39 @@
         la devolución de los RPC y usar varios.
         tomaria el endpoint segun el urlId peviamente modularizandolo para que no se pase de la cantidad que hay.
         */
-        function getRPC($urlId) {
-            /*
-            $urlId=1;
+    function getRPC(/* $urlId --> ¿Necesitamos este parametro? */) {
+        /*
+        $urlId=1;
         $endpoint = get("https://comunyt.co/relayer/api/v1/relayerRPC/getById/".$urlId);
         //$endpoint["response"] = json_decode($endpoint["response"],true);
         $endpoint = ($endpoint["response"][0]["endpoint"]);
         print_r($endpoint);
-        exit;*/
+        exit;
+        */
 
-        //TODO: Get lower order val
-        // $endpoint = get("https://comunyt.co/relayer/api/v1/relayerRPC/getByLowerOrderVal");
-        // $endpoint = $endpoint['response'][0]['endpoint'];
-        return 'https://polygon-amoy-bor-rpc.publicnode.com';
+        $endpoint = get("https://comunyt.co/relayer/api/v1/relayerRPC/getByLowerOrderVal");
+        if($endpoint['success'] === false){
+            email(getAdminMail(), "Problema: Error al buscar el RPC con el orderVal mas bajo", $endpoint);
+            return '';  //! Qué caso debo devolver acá?
+        } else {
+            $lowerOrderVal = $endpoint['response'][0]['orderVal']; 
+            $frecuency = $endpoint['response'][0]['frecuency'];
+            $urlId = $endpoint['response'][0]['id'];
+            $dataToSend = [
+                'orderVal' => $lowerOrderVal + $frecuency, // Sumo el orderVal + frecuency
+                'id' => $urlId
+            ];
+            
+            // TODO: Sumar calls? En qué parte?
+
+            $sumOrderValResponse = postRelayerRPC('updateOrderById', $dataToSend);
+            if($sumOrderValResponse['success'] === false){
+                email(getAdminMail(), "Problema: Error en getRPC al intentar sumar la frecuency al orderVal del endpoint RPC con ID ". $urlId, $sumOrderValResponse);
+            } 
+        }
+
+        // Retorno la URL del RPC
+        return $endpoint['response'][0]['endpoint'];
     }
 
     /* getFromAddress()
@@ -522,8 +542,20 @@
         haya actualizado.
         */
         function getNonce() {
-        global $sweb3;
-        return $sweb3->personal->getNonce();
+            global $sweb3;
+            $blockchainNonce = $sweb3->personal->getNonce();
+            $from = $sweb3->personal->address;  // Address es public así que debería funcionar, probar
+
+            $response = get('https://comunyt.co/relayer/api/v1/requestLogs/getByFrom/' . $from);
+            if($response['success'] === false){
+                email(getAdminMail(), 'Problema: Error en getNonce al buscar el nonce del address en BD', $response);
+            } else {
+                if($blockchainNonce > $response['response'][0]['nonce']){
+                    email(getAdminMail(), 'Problema crítico: El nonce de la blockchain es superior al nonce de la base de datos', 'Blockchain nonce: ' . $blockchainNonce . ' | BD nonce: ' . $response['response'][0]['nonce']);
+                }
+            }
+
+            return $blockchainNonce;
     }
 
     /* send($to, $data)
@@ -662,7 +694,7 @@
     }
 
 
-
+    
 
     function post($method,$data) {
         global $id;
@@ -737,6 +769,22 @@
         return $response;
     }
 
+    function postRelayerRPC($method, array $data){
+        $url = "https://comunyt.co/relayer/api/v1/relayerRPC/$method";
+        $curl = curl_init();
+        curl_setopt($curl, CURLOPT_URL, $url);
+        curl_setopt($curl, CURLOPT_POST, true);
+        curl_setopt($curl, CURLOPT_POSTFIELDS, $data);
+        $response = json_decode(curl_exec($curl), true);
+        if (empty($response) || $response === false) {
+            $error = curl_error($curl);
+            $response["msg"] = "Error en la solicitud cURL: " .$error;
+            $response["success"] = false;
+        }
+
+        curl_close($curl);
+        return $response;
+    }
 
     function get($url) {
         $curl = curl_init($url);
