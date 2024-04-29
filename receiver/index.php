@@ -6,7 +6,9 @@
     use SWeb3\Utils;
     use Web3\Contract;
 
-    define('ENV', parse_ini_file('.env'));  // Cargo el .env con variables de entorno
+
+    define('ENV', parse_ini_file('.env'));
+
 
 /* TO DO
     3)verify y send adentro podrían hacer los retries o la logica para errores en los rpc
@@ -244,6 +246,7 @@
 
 
         // Realizo un call al verifier del relayer para saber si se puede ejecutar o no y ahorrar gas ante falta de permisos
+        // la parte del retry aun no está probada
         $aux = $response["response"];
         $response = verify(getRelayerAddress(),$aux);
         $maxRetries=maxRetries();//10;
@@ -260,6 +263,7 @@
             $response = verify(getRelayerAddress(),$aux);
             $maxRetries--;
         }
+//// legamos hasta aca
 
         // Informo si hubo un error con la verificación. Esto si hay que ponerlo en el log o hacer retries
         if( isset($response["response"]) ) {
@@ -269,6 +273,8 @@
                 $excSelector = getExecuteSelector();
                 $response["response"] = str_replace($verSelector,$excSelector,$response["response"]);
                 $response = send(getRelayerAddress(),$response["response"]);
+
+                // faltan los reintentos y obviamente comprobacion de error final
 
                 if($response["success"]==true) {
                     $response["txHash"] = $response["response"];
