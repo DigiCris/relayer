@@ -41,8 +41,10 @@
             global $sweb3;
             global $nonce;  
             global $urlId;
-            $urlId = getNextUrlId();          
-            $url = getRPC($urlId);
+        
+            $rpcInfo = getRPCByLowerOrderVal();  
+            $url = $rpcInfo['endpoint'];
+            $urlId = $rpcInfo['id'];   
             $sweb3 = new SWeb3($url);
     
             // Opcional: si se van a enviar transacciones
@@ -56,8 +58,10 @@
             // Capturar cualquier excepción ocurrida durante la ejecución
             $response["success"] = false;
             $response["msg"] = "error: We could not initialize: " . $e->getMessage();
-
             // Corto la ejecución si falla
+
+            // Paso el response por el wrapper
+            $response = wrapper($response);
             echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             exit;
         }
@@ -69,9 +73,15 @@
             global $sweb3;
             global $nonce;
             global $urlId;
-            $urlId = $urlId++;          
-            $url = getRPC($urlId);  //! No entiendo por qué usamos acá el urlId, si getRPC debe devolver el RPC con orderVal más bajo
-                 
+
+            // Obtengo la cantidad de endpoints que tenemos para sacar el modulo
+            $endpointsCount = get('https://comunyt.co/api/v1/relayer/relayerRPC/getEndpointsCount');
+            $urlId = ($urlId++) % $endpointsCount['response'];  // Modulo de urlId + 1           
+
+            // Obtengo el rpc
+            $rpcInfo = getRPC($urlId);
+            $url = $rpcInfo['endpoint'];
+            $urlId = $rpcInfo['id'];
             $sweb3 = new SWeb3($url);
     
             // Opcional: si se van a enviar transacciones
@@ -240,6 +250,9 @@
                     email(getAdminMail(),"Problema ".$id.": update to wrongData status in en DB failed",$response);
                 }
             }
+
+            // Paso el response por el wrapper
+            $response = wrapper($response);
             echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             exit;
         }
@@ -313,6 +326,9 @@
         }
         //Imprimo el resultado, ya sea el hash creado o los mensajes de errores que se propagaron
         // esto si debo ponerlo en el log e incluso hacer el retry.
+
+        // Paso el response por el wrapper
+        $response = wrapper($response);
         echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         exit;
     }
@@ -324,34 +340,62 @@
         por el de ejecución para hacer la llamada al mentodo send)
         */
         function verify($to, $data) {
-        $responseAux = call($to,$data);
-        if($responseAux["success"]==false) {
-            $response["success"] = false;
-            $response["msg"]="We could not verify. Try again latter";
+            $responseAux = call($to,$data);
+            if($responseAux["success"]==false) {
+                $response["success"] = false;
+                $response["msg"]="We could not verify. Try again latter";
+                return $response;
+            }
+
+            $r = json_encode($responseAux["response"], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $r = json_decode($r,true);
+
+            if(strpos($r["result"],"1") > 10) {
+                $response["success"] = true;
+                $response["msg"]="Signer ok";
+                $response["response"] = $data;
+            } else {
+                $response["success"] = true;
+                $response["msg"]="Not the signer";
+                $response["response"] = false;
+            }
             return $response;
-        }
-
-        $r = json_encode($responseAux["response"], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        $r = json_decode($r,true);
-
-        if(strpos($r["result"],"1") > 10) {
-            $response["success"] = true;
-            $response["msg"]="Signer ok";
-            $response["response"] = $data;
-        } else {
-            $response["success"] = true;
-            $response["msg"]="Not the signer";
-            $response["response"] = false;
-        }
-        return $response;
     }
 
     /* getRPC($urlId)
-        me devuelve el RPC que se usa. Está en función porque así podemos cambiar la lógica de como organiza
-        la devolución de los RPC y usar varios.
-        tomaria el endpoint segun el urlId peviamente modularizandolo para que no se pase de la cantidad que hay.
-        */
-    function getRPC(/* $urlId --> ¿Necesitamos este parametro? */) {
+    me devuelve el RPC que se usa. Está en función porque así podemos cambiar la lógica de como organiza
+    la devolución de los RPC y usar varios.
+    tomaria el endpoint segun el urlId peviamente modularizandolo para que no se pase de la cantidad que hay.
+    */
+    function getRPC($urlId){
+        $response = json_decode(get("https://comunyt.co/relayer/api/v1/relayerRPC/getById/".$urlId), true);
+
+        if(!$response['success']){
+            email(getAdminMail(), 'Problema: Error al encontrar el RPC en getRPC con ID ' . $urlId, $response);
+            // Si hay error, llamo al  getByLowerOrderVal
+            $response = getRPCByLowerOrderVal();
+        } else {
+            $orderVal = $response['response'][0]['orderVal'];
+            $frecuency = $response['response'][0]['frecuency'];
+            $urlId = $response['response'][0]['id'];
+            $dataToSend = [
+                'orderVal' => $orderVal + $frecuency,
+                'id' => $urlId
+            ];
+
+            $sumOrderValResponse = postRelayerRPC('updateOrderById', $dataToSend);
+            if($sumOrderValResponse['success'] === false){
+                email(getAdminMail(), "Problema: Error en getRPC al intentar sumar la frecuency al orderVal del endpoint RPC con ID ". $urlId, $sumOrderValResponse);
+            } 
+        }
+
+        return $response['response'][0];
+    }
+
+    /* getRPCByLowerOrderVal()
+    devuelve el rpc con el orderval más bajo
+    */
+    function getRPCByLowerOrderVal() {
         /*
         $urlId=1;
         $endpoint = get("https://comunyt.co/relayer/api/v1/relayerRPC/getById/".$urlId);
@@ -383,7 +427,7 @@
         }
 
         // Retorno la URL del RPC
-        return $endpoint['response'][0]['endpoint'];
+        return $endpoint['response'][0];
     }
 
     /* getFromAddress()
@@ -544,7 +588,7 @@
         function getNonce() {
             global $sweb3;
             $blockchainNonce = $sweb3->personal->getNonce();
-            $from = $sweb3->personal->address;  // Address es public así que debería funcionar, probar
+            $from = $sweb3->personal->address;  // Address de from para obtener el nonce
 
             $response = get('https://comunyt.co/relayer/api/v1/requestLogs/getByFrom/' . $from);
             if($response['success'] === false){
@@ -797,6 +841,26 @@
         return $json;
     }
 
+    /* wrapper()
+        Maneja la respuesta para enviarle al back. 
+        El unico caso que estoy manejando en el back desde la parte de registers
+        en relayerSend, es 'status' == 'success'
+        Así que por ahora solo tomo que $response['success'] esté en true
+        y si no está en true, devuelvo canceled. 
+        */
+    function wrapper($response){
+        switch($response['success']){
+            case true:
+                $response['status'] = 'success';
+                break;
+            
+            case false:
+            default:
+                $response['status'] = 'canceled';
+                break;
+        }
+        return $response;
+    }
 
 
     

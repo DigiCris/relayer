@@ -839,6 +839,18 @@ class relayerRPC
         return $row;
     }
 
+    // Devuelve la cantidad de endpoints que hay, para sacar el modulo en changeRPC
+    public function readEndpointsCount()
+    {
+        $query = 'SELECT COUNT(*) AS quantity FROM relayerRPC';
+        $result = $this->base->prepare($query);
+        $result->execute();
+        $row = $result->fetch(PDO::FETCH_ASSOC);
+        $result->closeCursor();
+
+        return $row['quantity'];
+    }
+
 
 
 /*!

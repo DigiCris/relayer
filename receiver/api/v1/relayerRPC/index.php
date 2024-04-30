@@ -184,6 +184,12 @@ function getFunctions($get) {
             $result = getByLowerOrderVal();
             debug('getByLowerOrderVal');
             break;
+
+        case 'getEndpointsCount':
+            include_once "functions/read/getEndpointsCount.php";
+            $result = getEndpointsCount();
+            debug('getEndpointsCount');
+            break;
         default:
             $result['success']=false;
             $result['msg']='No valid get case selected';
