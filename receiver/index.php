@@ -380,7 +380,8 @@
             $urlId = $response['response'][0]['id'];
             $dataToSend = [
                 'orderVal' => $orderVal + $frecuency,
-                'id' => $urlId
+                'id' => $urlId,
+                'method' => 'updateOrderById'
             ];
 
             $sumOrderValResponse = postRelayerRPC('updateOrderById', $dataToSend);
@@ -415,7 +416,8 @@
             $urlId = $endpoint['response'][0]['id'];
             $dataToSend = [
                 'orderVal' => $lowerOrderVal + $frecuency, // Sumo el orderVal + frecuency
-                'id' => $urlId
+                'id' => $urlId,
+                'method' => 'updateOrderById'
             ];
             
             // TODO: Sumar calls? En qué parte?
