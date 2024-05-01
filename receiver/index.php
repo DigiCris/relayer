@@ -134,7 +134,7 @@
     function email($emailAddress, $titulo, $contenido) {
         // (1) Definición del correo y tomar parámetros del .env
         $transactional_api_key = ENV['BREVO_API_KEY'];     // APIKEY
-        $template_id = ENV['BREVO_TEMPLATE_ID'];           // Templateid de la plantilla
+        $template_id = intval(ENV['BREVO_TEMPLATE_ID']);           // Templateid de la plantilla
         $brevo_url = 'https://api.brevo.com/v3/smtp/email'; // Brevo email URL
         $from = 'contacto@comunyt.co';                     // Campo from del email
 
