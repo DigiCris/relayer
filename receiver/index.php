@@ -18,6 +18,7 @@
     $nonce = -1; // se pone global para setearlo una sola vez y ahorrar llamados
     $id = -1 ;
     $urlId = -1;
+    $endpointRPCalls = [];
     /*
     getRPC($urlId);
     exit;
@@ -41,7 +42,7 @@
             global $sweb3;
             global $nonce;  
             global $urlId;
-        
+
             $rpcInfo = getRPCByLowerOrderVal();  
             $url = $rpcInfo['endpoint'];
             $urlId = $rpcInfo['id'];   
@@ -60,6 +61,8 @@
             $response["msg"] = "error: We could not initialize: " . $e->getMessage();
             // Corto la ejecución si falla
 
+            // TODO: Enviar email 
+
             // Paso el response por el wrapper
             $response = wrapper($response);
             echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -73,10 +76,12 @@
             global $sweb3;
             global $nonce;
             global $urlId;
+            global $enpointRPCalls;
 
             // Obtengo la cantidad de endpoints que tenemos para sacar el modulo
             $endpointsCount = get('https://comunyt.co/api/v1/relayer/relayerRPC/getEndpointsCount');
             $urlId = ($urlId++) % $endpointsCount['response'];  // Modulo de urlId + 1           
+            //! Guardar los ids consecutivamente
 
             // Obtengo el rpc
             $rpcInfo = getRPC($urlId);
@@ -118,7 +123,8 @@
         futuro la forma en que se toma
         */
         function getAdminMail() {
-            return "cmarchese@comunyt.com";
+            return "nicofpalmaa@gmail.com"; // Seteado para hacer pruebas
+            //return "cmarchese@comunyt.com";
     }
 
     /* email($emailAddress,$titulo,$contenido)
@@ -368,6 +374,7 @@
     tomaria el endpoint segun el urlId peviamente modularizandolo para que no se pase de la cantidad que hay.
     */
     function getRPC($urlId){
+        global $endpointRPC;
         $response = json_decode(get("https://comunyt.co/relayer/api/v1/relayerRPC/getById/".$urlId), true);
 
         if(!$response['success']){
@@ -379,7 +386,7 @@
             $frecuency = $response['response'][0]['frecuency'];
             $urlId = $response['response'][0]['id'];
             $dataToSend = [
-                'orderVal' => $orderVal + $frecuency,
+                'order' => $orderVal + $frecuency,
                 'id' => $urlId,
                 'method' => 'updateOrderById'
             ];
@@ -415,12 +422,13 @@
             $frecuency = $endpoint['response'][0]['frecuency'];
             $urlId = $endpoint['response'][0]['id'];
             $dataToSend = [
-                'orderVal' => $lowerOrderVal + $frecuency, // Sumo el orderVal + frecuency
+                'order' => $lowerOrderVal + $frecuency, // Sumo el orderVal + frecuency
                 'id' => $urlId,
                 'method' => 'updateOrderById'
             ];
             
             // TODO: Sumar calls? En qué parte?
+
 
             $sumOrderValResponse = postRelayerRPC('updateOrderById', $dataToSend);
             if($sumOrderValResponse['success'] === false){
@@ -577,7 +585,9 @@
         trabajar con muchas cadenas.
         */
         function getChainId() {
-        return 0x13882;
+            // ! chainID de polygon mainnet = 0x89 = 137
+
+            return 0x13882;
     }
 
     /* getNonce()
@@ -588,19 +598,22 @@
         haya actualizado.
         */
         function getNonce() {
+            //! Buscar el nonce más alto, ya que este endp. devuelve muchas filas.
             global $sweb3;
             $blockchainNonce = $sweb3->personal->getNonce();
             $from = $sweb3->personal->address;  // Address de from para obtener el nonce
 
-            $response = get('https://comunyt.co/relayer/api/v1/requestLogs/getByFrom/' . $from);
-            if($response['success'] === false){
+            $response = get('https://comunyt.co/relayer/api/v1/requestLogs/getLastNonceByFrom/' . $from);
+            if($response['success'] === false || empty($response)){
                 email(getAdminMail(), 'Problema: Error en getNonce al buscar el nonce del address en BD', $response);
             } else {
-                if($blockchainNonce > $response['response'][0]['nonce']){
+                if($blockchainNonce > ($response['response']['nonce'] + 1)){
                     email(getAdminMail(), 'Problema crítico: El nonce de la blockchain es superior al nonce de la base de datos', 'Blockchain nonce: ' . $blockchainNonce . ' | BD nonce: ' . $response['response'][0]['nonce']);
                 }
             }
-
+            //! Sumar 1 al nonce de la BD para poder comparar con el de blockchain
+            //! Hacer update del nonce al terminar
+            //! Devuelvo el mayor
             return $blockchainNonce;
     }
 
@@ -821,6 +834,8 @@
         curl_setopt($curl, CURLOPT_URL, $url);
         curl_setopt($curl, CURLOPT_POST, true);
         curl_setopt($curl, CURLOPT_POSTFIELDS, $data);
+        curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+        
         $response = json_decode(curl_exec($curl), true);
         if (empty($response) || $response === false) {
             $error = curl_error($curl);

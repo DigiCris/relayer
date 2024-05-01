@@ -200,6 +200,17 @@ function getFunctions($get) {
             $result = getByRetry($get['retry']);
             debug('getByRetry');
             break;
+
+        case 'getLastNonceByFrom':
+            include_once 'functions/read/getLastNonceByFrom.php';
+            if(!isset($get['from'])){
+                $result['success'] = false;
+                $result['msg'] = 'No from field provided';
+                break;
+            }
+            $result = getLastNonceByFrom($get['from']);
+            debug('getLastNonceByFrom');
+            break;
             
         default:
             $result['success']=false;

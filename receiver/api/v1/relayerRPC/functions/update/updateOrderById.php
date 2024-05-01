@@ -25,7 +25,7 @@ function updateOrderById($id, $order) {
         $success['response'] = $information->updateOrderById($id);
         $success['response'] = $information->readId($id);
         $success['response'] = $success['response'][0];
-        if($success['response']['order'] == $order) {
+        if($success['response']['orderVal'] == $order) {
             $success['success'] = true;
             $success['msg'] = 'Updated.';
         }else {

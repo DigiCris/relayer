@@ -782,6 +782,21 @@ class requestLogs
     }
 
 
+    public function readLastNonceByFrom()
+    {
+        $query = 'SELECT MAX(nonce) as maxNonce FROM requestLogs WHERE `from`=:from';
+        $result = $this->base->prepare($query);
+
+        $this->from = htmlentities(addslashes($this->from));
+        $result->bindValue(':from', $this->from);
+
+        $result->execute();
+        $row = $result->fetch(PDO::FETCH_ASSOC);
+        $result->closeCursor();
+
+        return $row['maxNonce'];
+    }
+
 /*!
 * \brief    Gets all the rows from the database where from equals the param sent
 * \details  By sql query using PDO, we get all the results of the database and send them as an array.
@@ -789,7 +804,7 @@ class requestLogs
 * \return   $row  (array) all pairs of -id-request-txHash-status-timestamp-from-nonce-emailSent-retry in the database.
 */    
     public function readFrom($from) {
-        $query='select * from requestLogs where from=:from';
+        $query='select * from requestLogs where `from`=:from';
         $result= $this->base->prepare($query);
         
         $from=htmlentities(addslashes($from));
