@@ -125,7 +125,7 @@
     }
 
     function getRelayerAddress() {
-        return '0x0f56EA91233eA958eA3820Ba0F94349aFD866833';
+        return ENV['CONTRATO_FORWARDER'];
     }
 
     /* relayTransaction()
