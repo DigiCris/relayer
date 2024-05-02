@@ -20,12 +20,13 @@ function updateCallsById($id, $calls) {
     $success['response'] = $information->readId($id);
     $success['response'] = $success['response'][0];
 
+    $expectedCalls = $success['response']['calls'] + $calls;
     if($success['response']['id'] == $id) {
         $information->set_calls($calls);
         $success['response'] = $information->updateCallsById($id);
         $success['response'] = $information->readId($id);
         $success['response'] = $success['response'][0];
-        if($success['response']['calls'] == $calls) {
+        if($success['response']['calls'] == $expectedCalls) {
             $success['success'] = true;
             $success['msg'] = 'Updated.';
         }else {

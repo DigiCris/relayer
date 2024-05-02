@@ -19,13 +19,14 @@ function updateMissById($id, $miss) {
     $information = new relayerRPC();
     $success['response'] = $information->readId($id);
     $success['response'] = $success['response'][0];
+    $expectedMiss = $success['response']['miss'] + $miss;
 
     if($success['response']['id'] == $id) {
         $information->set_miss($miss);
         $success['response'] = $information->updateMissById($id);
         $success['response'] = $information->readId($id);
         $success['response'] = $success['response'][0];
-        if($success['response']['miss'] == $miss) {
+        if($success['response']['miss'] == $expectedMiss) {
             $success['success'] = true;
             $success['msg'] = 'Updated.';
         }else {

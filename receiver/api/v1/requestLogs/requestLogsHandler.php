@@ -544,7 +544,7 @@ class requestLogs
 */
     public function updateRetryById($id) {
         //SQL query for updating
-        $query='update requestLogs set retry=? where id=?'; 
+        $query='update requestLogs set retry= retry + ? where id=?'; 
 
         $resultado= $this->base->prepare($query);
         $this->retry =          htmlentities(addslashes($this->retry));

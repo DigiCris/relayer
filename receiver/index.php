@@ -19,6 +19,9 @@
     $id = -1 ;
     $urlId = -1;
     $endpointRPCalls = 0;
+    $emailSent = false;
+    $endpointRPCRetries = 0;
+    $endpointRPCMiss = 0;
     /*
     getRPC($urlId);
     exit;
@@ -54,7 +57,6 @@
             $sweb3->setPersonalData($from_address, $from_address_private_key);
             $nonce = getNonce();
 
-            // TODO: Probar reintentos antes de cortar la ejecución. Probar con otro RPC si el primero falla.
         } catch (Exception $e) {
             // Capturar cualquier excepción ocurrida durante la ejecución
             $response["success"] = false;
@@ -75,12 +77,11 @@
             global $sweb3;
             global $nonce;
             global $urlId;
-            global $enpointRPCalls;
 
             // Obtengo la cantidad de endpoints que tenemos para sacar el modulo
-            $endpointsCount = get('https://comunyt.co/api/v1/relayer/relayerRPC/getEndpointsCount');
+            $endpointsCount = get('https://comunyt.co/relayer/api/v1/relayerRPC/getEndpointsCount');
             $urlId = ($urlId++) % $endpointsCount['response'];  // Modulo de urlId + 1           
-            //! Guardar los ids consecutivamente
+            //! Guardar los ids consecutivamente en bd, sin dejar espacios vacíos (ej: 1,2,3,4...)
 
             // Obtengo el rpc
             $rpcInfo = getRPC($urlId);
@@ -122,8 +123,8 @@
         futuro la forma en que se toma
         */
         function getAdminMail() {
-            return "cosarandom77@gmail.com"; // Seteado para hacer pruebas
-            //return "cmarchese@comunyt.com";
+            //return "cosarandom77@gmail.com"; // Seteado para hacer pruebas
+            return "cmarchese@comunyt.com";
     }
 
     /* email($emailAddress,$titulo,$contenido)
@@ -131,6 +132,7 @@
         Falta implementar. Pedirle a Nico.
         */
     function email($emailAddress, $titulo, $contenido) {
+        global $emailSent;
         // (1) Definición del correo y tomar parámetros del .env
         $transactional_api_key = ENV['BREVO_API_KEY'];     // APIKEY
         $template_id = intval(ENV['BREVO_TEMPLATE_ID']);           // Templateid de la plantilla
@@ -189,6 +191,10 @@
         $brevo_response['http_code'] = curl_getinfo($c, CURLINFO_HTTP_CODE);
         curl_close($c);
 
+        // Pongo emailSent en true si antes estaba en falso y si efectivamente se envio el correo
+        if($emailSent == false && ($brevo_response['http_code'] == 200 || $brevo_response['http_code'] == 201)){
+            $emailSent = true;
+        }
         return $brevo_response; 
         // Brevo devuelve 201 o 202 como codigos de exitos. 
         // Cualquier otro código será considerado como falla al enviar correo.
@@ -196,7 +202,14 @@
     }
 
     function maxRetries() {
-        return 10;
+        // Se multiplica la cantidad de endpoints * los retriesByEndpoint
+        $endpointsCount = get('https://comunyt.co/relayer/api/v1/relayerRPC/getEndpointsCount')['response'];
+        if(isset($endpointsCount) || !empty($endpointsCount)){
+            return $endpointsCount * retriesByEndpoint();
+        } else {
+            // Si por algun motivo falla el hecho de botener el endpointsCount, retorno 10 por defecto
+            return 10;
+        }
     }
     function retriesByEndpoint() {
         return 4;
@@ -214,6 +227,16 @@
 
         global $id;
         global $nonce;
+        global $emailSent;
+        global $endpointRPCRetries;
+
+        // obtengo los datos que se mandan con la firma para relayar
+        $dataReceived = receiveData();  
+        // Si falla en recibir los datos mando el error. En este caso no hace falta crear log.
+        if($dataReceived["success"]==false) {
+            echo json_encode($dataReceived, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            exit;
+        }
 
         // creo el campo data que se le va a mandar al relayer con los paramentros que vienen del post
         $verSelector = getVerifierSelector();
@@ -221,6 +244,7 @@
         //$_POST["selector"] = $_POST["selector"].'1'; // probando mal funcionamiento de createDatastring
 
         // Agregado para el post y su caso de falla con envío de email
+        $emailSentPreviouslyToSetAll = $emailSent;
         $response = post("setAll",$_POST);
         if ($response["success"] == false) {
             email(getAdminMail(),"Problema: set request en DB fallo",$response);
@@ -250,6 +274,10 @@
                 }
             }
 
+            // Como acá se va a cortar la ejecución luego de hacer el setAll, actualizo el emailSent si se mandó un correo despues del setAll.
+            if($emailSentPreviouslyToSetAll == false && $emailSent == true){
+                postRequestLogs('updateEmailSentById', ['method' => 'updateEmailSentById', 'emailSent' => $emailSent, 'id' => $id]);
+            }
             // Paso el response por el wrapper
             $response = wrapper($response);
             echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -264,6 +292,8 @@
         $retriesByEndpoint = retriesByEndpoint();//4;
         for($i=1; $response["success"]==false && $i<=$retriesByEndpoint && $maxRetries>0; $i++) { //14 segundos con cada uno
             if($i==$retriesByEndpoint) {
+                updateRPCCalls();
+                updateRequestRetries();
                 changeRPC();
                 $micro_seconds = 0;
                 $i=1;
@@ -273,6 +303,7 @@
             usleep($micro_seconds);
             $response = verify(getRelayerAddress(),$aux);
             $maxRetries--;
+            $endpointRPCRetries++;
         }
 
         // Informo si hubo un error con la verificación. Esto si hay que ponerlo en el log o hacer retries
@@ -324,12 +355,18 @@
         //Imprimo el resultado, ya sea el hash creado o los mensajes de errores que se propagaron
         // esto si debo ponerlo en el log e incluso hacer el retry.
 
-        // Actualizo el nonce de la transacción
-        postRequestLogs('updateNonceById', [
-            'method' => 'updateNonceById', 
-            'nonce' => $nonce, 
-            'id' => $id
-        ]);
+        // Sumo las calls hechas
+        updateRPCCalls();
+
+        // Sumo los retrys de la request si es mayor a 0
+        if($endpointRPCRetries > 0){
+            updateRequestRetries();
+        }
+
+        // Verifico si se envió algún email luego del setAll, para setear el campo emailSent
+        if($emailSentPreviouslyToSetAll == false && $emailSent == true){
+            postRequestLogs('updateEmailSentById', ['method' => 'updateEmailSentById', 'emailSent' => $emailSent, 'id' => $id]);
+        }
 
         // Paso el response por el wrapper
         $response = wrapper($response);
@@ -344,12 +381,15 @@
         por el de ejecución para hacer la llamada al mentodo send)
         */
         function verify($to, $data) {
+            global $endpointRPCalls;
             $responseAux = call($to,$data);
             if($responseAux["success"]==false) {
                 $response["success"] = false;
                 $response["msg"]="We could not verify. Try again latter";
                 return $response;
             }
+
+            $endpointRPCalls++; // Sumo calls
 
             $r = json_encode($responseAux["response"], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             $r = json_decode($r,true);
@@ -397,25 +437,59 @@
         return $response['response'][0];
     }
 
+    /* updateRPCCalls()
+       Actualizo las calls del RPC antes de cambiarlo
+    */
+    function updateRPCCalls()
+    {
+        global $urlId;
+        global $endpointRPCalls;
+        // Envia las calls que se almacenaron para el RPC que se estaba usando.
+        $response = postRelayerRPC('updateCallsById', ['calls' => $endpointRPCalls, 'id' => $urlId, 'method' => 'updateCallsById']);
+        
+        // Lo dejo comentado ya que como se usa en los retrys, si falla quizas enviariamos muchos correos para notificar el error. 
+        // if(empty($response) || $response['success'] == false){
+        //     email(getAdminMail(), 'Problema: Fallo al actualizar las calls', 'Hubo un problema al intentar actualizar las calls del endpointRPC ' . $urlId . '. Se hicieron ' . $endpointRPCalls . ' calls. Respuesta de bd: ' . json_encode($response));
+        // }
+        
+        // Las vuelvo a 0 porque quizás luego cambia el RPC
+        $endpointRPCalls = 0;   
+    }
+
+    /* updateRequestRetries()
+        Actualizo los retries del rpc que se uso para la request
+    */
+    function updateRequestRetries()
+    {
+        global $endpointRPCRetries;
+        global $id;
+        global $urlId;
+
+        // 1. Actualizo los retrys
+        $response = postRequestLogs('updateRetryById', ['method' => 'updateRetryById', 'id' => $id, 'retry' => $endpointRPCRetries]);
+
+        // 2. Actualizo los miss (va a ser igual a los retrys, ya que cada vez que se suma un retry, es porque hubo un miss)
+        $response2 = postRelayerRPC('updateMissById', ['method' => 'updateMissById', 'id' => $urlId, 'miss' => $endpointRPCRetries]);
+
+        // Lo dejo comentado ya que como se usa en los retrys, si falla quizas enviariamos muchos correos para notificar el error. 
+        // if(empty($response) || $response['success'] == false){
+        //     email(getAdminMail(), 'Problema: Fallo al actualizar los retrys del RPC usado en la request', 'Se hicieron ' . $endpointRPCRetries . '. Id de la request: ' . $id);
+        // }
+
+        // Reseteo los retries
+        $endpointRPCRetries = 0;
+    }
+
     /* getRPCByLowerOrderVal()
     devuelve el rpc con el orderval más bajo
     */
     function getRPCByLowerOrderVal() {
-        /*
-        $urlId=1;
-        $endpoint = get("https://comunyt.co/relayer/api/v1/relayerRPC/getById/".$urlId);
-        //$endpoint["response"] = json_decode($endpoint["response"],true);
-        $endpoint = ($endpoint["response"][0]["endpoint"]);
-        print_r($endpoint);
-        exit;
-        */
-
         $endpoint = get("https://comunyt.co/relayer/api/v1/relayerRPC/getByLowerOrderVal");
         if($endpoint['success'] === false){
             email(getAdminMail(), "Problema: Error al buscar el RPC con el orderVal mas bajo", $endpoint);
 
             // Si falla el endpoint de lowerOrderVAl, llamo al de getRPC con un urlId aleatorio
-            $endpointsCount = get('https://comunyt.co/api/v1/relayer/relayerRPC/getEndpointsCount');
+            $endpointsCount = get('https://comunyt.co/relayer/api/v1/relayerRPC/getEndpointsCount');
             $urlId = random_int(1, $endpointsCount['response']);
             return getRPC($urlId);
         } else {
@@ -428,9 +502,6 @@
                 'method' => 'updateOrderById'
             ];
             
-            // TODO: Sumar calls? En qué parte?
-
-
             $sumOrderValResponse = postRelayerRPC('updateOrderById', $dataToSend);
             if($sumOrderValResponse['success'] === false){
                 email(getAdminMail(), "Problema: Error en getRPC al intentar sumar la frecuency al orderVal del endpoint RPC con ID ". $urlId, $sumOrderValResponse);
@@ -605,20 +676,10 @@
         */
         function getNonce() {
             global $sweb3;
-            receiveData();                                      //! Tiro un receivedata para obtener el from
-            // obtengo los datos que se mandan con la firma para relayar
-            $dataReceived = receiveData();  // Esto estaba en relayTransaction, pero aca lo necesito
-            // Si falla en recibir los datos mando el error. En este caso no hace falta crear log.
-            if($dataReceived["success"]==false) {
-                echo json_encode($dataReceived, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-                exit;
-            }
-
-            $from = $_POST['from'];                             //! Estoy tomando el from desde aca
             $blockchainNonce = $sweb3->personal->getNonce();    // BigInteger (de libreria math)
-            //$from = $sweb3->personal->address;  //! Esto no funciona porque obtiene otro from. No el que se sube a BD.
+            $from = $sweb3->personal->address;   // Obtiene el address de la billetera relay
 
-            $response = get('https://comunyt.co/relayer/api/v1/requestLogs/getLastNonceByFrom/' . $from);
+            $response = getNonceFromDatabase(intval($blockchainNonce->toString()) /* Eliminar luego este param */);
             if($response['success'] === false || empty($response)){
                 email(getAdminMail(), 'Problema: Error en getNonce al buscar el nonce del address en BD',  'Respuesta de base de datos: ' . $response . ' | El from que falló fue: ' . $from);
             } else {
@@ -631,9 +692,20 @@
                 }
             }
             
-            // Retorno el mayor. Compruebo si setá seteado el mayor, si no devuelvo el de la blockchain.
-            if(isset($higherNonce)) return $higherNonce;
-            else return $blockchainNonce;
+            //! Por ahora devuelvo el nonce de la blockchain, luego obtenemos el de la API aux.
+            //Retorno el mayor. Compruebo si setá seteado el mayor, si no devuelvo el de la blockchain.
+            // if(isset($higherNonce)) return $higherNonce;
+            // else return intval($blockchainNonce->toString());
+            return intval($blockchainNonce->toString());
+    }
+
+    function getNonceFromDatabase($nonce /* Esto se debe borrar cuando se implemente bien */){
+        //! Funcion a implementar. Tomar Nonce de la nueva api que guarda el getFromAddress y getPrivateKey
+        // return get('https://comunyt.co/relayer/api/v1/addressKeys')['nonce']; // Implementar algo así
+        return [
+            "success" => true,
+            "response" => $nonce
+        ];
     }
 
     /* send($to, $data)
@@ -666,7 +738,6 @@
 
             // Sumo calls
             $endpointRPCalls++;
-            postRequestLogs('updateCallsById', ['calls' => $endpointRPCalls, 'id' => $urlId]);
 
             $response["success"] = true;
             $response["msg"] = "sent successfully to blockchain";
@@ -748,6 +819,7 @@
         try {
             global $sweb3;
             global $nonce; // es una variable global para calcularlo una sola vez y ahorrar llamados al RPC
+            global $endpointRPCalls;
             $callParams = [
                 [
                     'to' => $to,
@@ -756,6 +828,8 @@
                 'latest'
             ];
     
+            // Sumo calls
+            $endpointRPCalls++;
             $result = $sweb3->call('eth_call', $callParams);
     
             $error = serialize($result);
@@ -764,7 +838,7 @@
                 $response["msg"] = "error: call 1) data not sent to blockchain: " . $error;
                 return $response;
             }
-    
+
             $response["success"] = true;
             $response["msg"] = "call successful";
             $response["response"] = $result;
@@ -776,6 +850,17 @@
             $response["msg"] = "error: call 2) data not sent to blockchain: " . $e->getMessage();
             return $response;
         }
+    }
+
+    /* report()
+        1. Envia un email avisando que el consecutiveMiss es mayor a 10 y dateReported es mayor a 6hs.
+            Cuando mando el email, hago un update del dateReported
+
+        2. Si solo 1 endpoint no tiene consecutiveMiss (o todos lo tienen), tambien informarlo por email.
+    */
+    function report()
+    {
+        return;
     }
 
     // Llamados post a requestLogs. Es lo mismo que la funcion "post" pero tiene otras cosas que no quiero eliminar por las dudas.
@@ -800,6 +885,9 @@
 
     function post($method,$data) {
         global $id;
+        global $nonce;
+        global $emailSent;
+
         $backup = $_POST;
         $_POST = array();
 
@@ -824,6 +912,7 @@
             $data["from"] = '';
         }
 
+
         $data = array(
             "method" => $method,
             "id" => $id,
@@ -831,8 +920,8 @@
             "txHash" => $txHash,
             "status" => $status,
             "from" => $data["from"],
-            "nonce" => 0,
-            "emailSent" => 0,
+            "nonce" => $nonce,
+            "emailSent" => $emailSent,
             "retry" => 0,
             "timestamp" => date('Y-m-d H:i:s')
         );

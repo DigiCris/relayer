@@ -393,7 +393,7 @@ class relayerRPC
 */
     public function updateCallsById($id) {
         //SQL query for updating
-        $query='update relayerRPC set calls=? where id=?'; 
+        $query='update relayerRPC set calls= calls + ? where id=?'; 
 
         $resultado= $this->base->prepare($query);
         $this->calls =          htmlentities(addslashes($this->calls));
@@ -462,7 +462,7 @@ class relayerRPC
 */
     public function updateMissById($id) {
         //SQL query for updating
-        $query='update relayerRPC set miss=? where id=?'; 
+        $query='update relayerRPC set miss= miss + ? where id=?'; 
 
         $resultado= $this->base->prepare($query);
         $this->miss =          htmlentities(addslashes($this->miss));
