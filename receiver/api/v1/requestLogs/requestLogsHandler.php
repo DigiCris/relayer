@@ -581,6 +581,22 @@ class requestLogs
     }
     
 
+    public function updateNonceById($id)
+    {
+        $query = 'UPDATE requestLogs SET nonce = :nonce WHERE id = :id';
+        $result = $this->base->prepare($query);
+        $this->id = htmlentities(addslashes($id));
+        $this->nonce = htmlentities(addslashes($this->nonce));
+
+        $result->bindValue(':nonce', $this->nonce);
+        $result->bindValue(':id', $id);
+
+        $success = $result->execute();
+        $result->closeCursor();
+
+        return $success;
+    }
+
 
 /*!
 * \brief    Gets all the rows from the database 

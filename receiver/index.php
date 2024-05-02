@@ -18,7 +18,7 @@
     $nonce = -1; // se pone global para setearlo una sola vez y ahorrar llamados
     $id = -1 ;
     $urlId = -1;
-    $endpointRPCalls = [];
+    $endpointRPCalls = 0;
     /*
     getRPC($urlId);
     exit;
@@ -60,8 +60,7 @@
             $response["success"] = false;
             $response["msg"] = "error: We could not initialize: " . $e->getMessage();
             // Corto la ejecución si falla
-
-            // TODO: Enviar email 
+            email(getAdminMail(), 'Problema: Error al ejecutar initialize()', 'Hay un problema al iniciar y ejecutar initialize(). El mensaje de error recibido es: ' . $e->getMessage());
 
             // Paso el response por el wrapper
             $response = wrapper($response);
@@ -123,7 +122,7 @@
         futuro la forma en que se toma
         */
         function getAdminMail() {
-            return "nicofpalmaa@gmail.com"; // Seteado para hacer pruebas
+            return "cosarandom77@gmail.com"; // Seteado para hacer pruebas
             //return "cmarchese@comunyt.com";
     }
 
@@ -193,7 +192,7 @@
         return $brevo_response; 
         // Brevo devuelve 201 o 202 como codigos de exitos. 
         // Cualquier otro código será considerado como falla al enviar correo.
-        //echo json_encode($contenido, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        // echo json_encode($contenido, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     }
 
     function maxRetries() {
@@ -214,13 +213,7 @@
         function relayTransaction() {
 
         global $id;
-        // obtengo los datos que se mandan con la firma para relayar
-        $response = receiveData();
-        // Si falla en recibir los datos mando el error. En este caso no hace falta crear log.
-        if($response["success"]==false) {
-            echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-            exit;
-        }
+        global $nonce;
 
         // creo el campo data que se le va a mandar al relayer con los paramentros que vienen del post
         $verSelector = getVerifierSelector();
@@ -263,7 +256,6 @@
             exit;
         }
 
-
         // Realizo un call al verifier del relayer para saber si se puede ejecutar o no y ahorrar gas ante falta de permisos
         // la parte del retry aun no está probada
         $aux = $response["response"];
@@ -282,7 +274,6 @@
             $response = verify(getRelayerAddress(),$aux);
             $maxRetries--;
         }
-//// legamos hasta aca
 
         // Informo si hubo un error con la verificación. Esto si hay que ponerlo en el log o hacer retries
         if( isset($response["response"]) ) {
@@ -333,6 +324,13 @@
         //Imprimo el resultado, ya sea el hash creado o los mensajes de errores que se propagaron
         // esto si debo ponerlo en el log e incluso hacer el retry.
 
+        // Actualizo el nonce de la transacción
+        postRequestLogs('updateNonceById', [
+            'method' => 'updateNonceById', 
+            'nonce' => $nonce, 
+            'id' => $id
+        ]);
+
         // Paso el response por el wrapper
         $response = wrapper($response);
         echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
@@ -374,8 +372,7 @@
     tomaria el endpoint segun el urlId peviamente modularizandolo para que no se pase de la cantidad que hay.
     */
     function getRPC($urlId){
-        global $endpointRPC;
-        $response = json_decode(get("https://comunyt.co/relayer/api/v1/relayerRPC/getById/".$urlId), true);
+        $response = get("https://comunyt.co/relayer/api/v1/relayerRPC/getById/".$urlId);
 
         if(!$response['success']){
             email(getAdminMail(), 'Problema: Error al encontrar el RPC en getRPC con ID ' . $urlId, $response);
@@ -416,7 +413,11 @@
         $endpoint = get("https://comunyt.co/relayer/api/v1/relayerRPC/getByLowerOrderVal");
         if($endpoint['success'] === false){
             email(getAdminMail(), "Problema: Error al buscar el RPC con el orderVal mas bajo", $endpoint);
-            return '';  //! Qué caso debo devolver acá?
+
+            // Si falla el endpoint de lowerOrderVAl, llamo al de getRPC con un urlId aleatorio
+            $endpointsCount = get('https://comunyt.co/api/v1/relayer/relayerRPC/getEndpointsCount');
+            $urlId = random_int(1, $endpointsCount['response']);
+            return getRPC($urlId);
         } else {
             $lowerOrderVal = $endpoint['response'][0]['orderVal']; 
             $frecuency = $endpoint['response'][0]['frecuency'];
@@ -547,19 +548,19 @@
         no se recibió nada en el post o hubo algún problema propaga el error devolviendolo.
         */
         function receiveData() {
-        //Ubico la data que recibo en $_POST
-        setPostWhenMissing();
-        //verifico que haya recibido algo
-        if(!empty($_POST)) {
-            $response["success"]=true;
-            $response["msg"]="data received. Saved in POST";
-            $response["response"] = $_POST;
-        } else {
-            $response["success"]=false;
-            $response["msg"]="error: no post data sent";
-        }
-        //devuelvo lo que recibí o el success en false para verificarlo mas arriba
-        return $response;;   
+            //Ubico la data que recibo en $_POST
+            setPostWhenMissing();
+            //verifico que haya recibido algo
+            if(!empty($_POST)) {
+                $response["success"]=true;
+                $response["msg"]="data received. Saved in POST";
+                $response["response"] = $_POST;
+            } else {
+                $response["success"]=false;
+                $response["msg"]="error: no post data sent";
+            }
+            //devuelvo lo que recibí o el success en false para verificarlo mas arriba
+            return $response;
     }
 
     /* getGas()
@@ -585,9 +586,14 @@
         trabajar con muchas cadenas.
         */
         function getChainId() {
-            // ! chainID de polygon mainnet = 0x89 = 137
-
-            return 0x13882;
+            $host = explode('.', $_SERVER['HTTP_HOST']);
+            if(end($host) === '.com'){
+                // Polygon mainnet 0x89 = 137
+                return 0x89;
+            } else {
+                // Polygon amoy testnet 0x13882
+                return 0x13882;
+            }
     }
 
     /* getNonce()
@@ -598,23 +604,36 @@
         haya actualizado.
         */
         function getNonce() {
-            //! Buscar el nonce más alto, ya que este endp. devuelve muchas filas.
             global $sweb3;
-            $blockchainNonce = $sweb3->personal->getNonce();
-            $from = $sweb3->personal->address;  // Address de from para obtener el nonce
+            receiveData();                                      //! Tiro un receivedata para obtener el from
+            // obtengo los datos que se mandan con la firma para relayar
+            $dataReceived = receiveData();  // Esto estaba en relayTransaction, pero aca lo necesito
+            // Si falla en recibir los datos mando el error. En este caso no hace falta crear log.
+            if($dataReceived["success"]==false) {
+                echo json_encode($dataReceived, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                exit;
+            }
+
+            $from = $_POST['from'];                             //! Estoy tomando el from desde aca
+            $blockchainNonce = $sweb3->personal->getNonce();    // BigInteger (de libreria math)
+            //$from = $sweb3->personal->address;  //! Esto no funciona porque obtiene otro from. No el que se sube a BD.
 
             $response = get('https://comunyt.co/relayer/api/v1/requestLogs/getLastNonceByFrom/' . $from);
             if($response['success'] === false || empty($response)){
-                email(getAdminMail(), 'Problema: Error en getNonce al buscar el nonce del address en BD', $response);
+                email(getAdminMail(), 'Problema: Error en getNonce al buscar el nonce del address en BD',  'Respuesta de base de datos: ' . $response . ' | El from que falló fue: ' . $from);
             } else {
-                if($blockchainNonce > ($response['response']['nonce'] + 1)){
-                    email(getAdminMail(), 'Problema crítico: El nonce de la blockchain es superior al nonce de la base de datos', 'Blockchain nonce: ' . $blockchainNonce . ' | BD nonce: ' . $response['response'][0]['nonce']);
+                $dbNonce = $response['response'] + 1;
+                if(intval($blockchainNonce->toString()) > ($dbNonce)){
+                    $higherNonce = $blockchainNonce;
+                    email(getAdminMail(), 'Problema crítico: El nonce de la blockchain es superior al nonce de la base de datos', 'Blockchain nonce: ' . $blockchainNonce->toString() . ' | BD nonce: ' . $response['response']);
+                } else {
+                    $higherNonce = $dbNonce;
                 }
             }
-            //! Sumar 1 al nonce de la BD para poder comparar con el de blockchain
-            //! Hacer update del nonce al terminar
-            //! Devuelvo el mayor
-            return $blockchainNonce;
+            
+            // Retorno el mayor. Compruebo si setá seteado el mayor, si no devuelvo el de la blockchain.
+            if(isset($higherNonce)) return $higherNonce;
+            else return $blockchainNonce;
     }
 
     /* send($to, $data)
@@ -625,6 +644,8 @@
         try {
             global $nonce; // es una variable global para caluclarlo una sola vez y ahorrar llamados al RPC
             global $sweb3;
+            global $endpointRPCalls;
+            global $urlId;
             $sendParams = [
                 'from' =>    $sweb3->personal->address,
                 'to' =>      $to,
@@ -642,6 +663,11 @@
                 $response["msg"] = "error: 1) data not sent to blockchain: ". $error;
                 return $response;
             }
+
+            // Sumo calls
+            $endpointRPCalls++;
+            postRequestLogs('updateCallsById', ['calls' => $endpointRPCalls, 'id' => $urlId]);
+
             $response["success"] = true;
             $response["msg"] = "sent successfully to blockchain";
             $response["response"] = $result->result;
@@ -752,8 +778,25 @@
         }
     }
 
+    // Llamados post a requestLogs. Es lo mismo que la funcion "post" pero tiene otras cosas que no quiero eliminar por las dudas.
+    function postRequestLogs($method, array $data){
+        $url = "https://comunyt.co/relayer/api/v1/requestLogs/$method";
+        $curl = curl_init();
+        curl_setopt($curl, CURLOPT_URL, $url);
+        curl_setopt($curl, CURLOPT_POST, true);
+        curl_setopt($curl, CURLOPT_POSTFIELDS, $data);
+        curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+        
+        $response = json_decode(curl_exec($curl), true);
+        if (empty($response) || $response === false) {
+            $error = curl_error($curl);
+            $response["msg"] = "Error en la solicitud cURL: " .$error;
+            $response["success"] = false;
+        }
 
-    
+        curl_close($curl);
+        return $response;
+    }
 
     function post($method,$data) {
         global $id;
@@ -828,6 +871,7 @@
         return $response;
     }
 
+    // Llamados post a relayerRPC
     function postRelayerRPC($method, array $data){
         $url = "https://comunyt.co/relayer/api/v1/relayerRPC/$method";
         $curl = curl_init();
@@ -846,6 +890,7 @@
         curl_close($curl);
         return $response;
     }
+
 
     function get($url) {
         $curl = curl_init($url);
