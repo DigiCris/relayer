@@ -81,8 +81,12 @@
 
             // Obtengo la cantidad de endpoints que tenemos para sacar el modulo
             $endpointsCount = get('https://comunyt.co/relayer/api/v1/relayerRPC/getEndpointsCount');
-            $urlId = ($urlId++) % $endpointsCount['response'];  // Modulo de urlId + 1           
-            //! Guardar los ids consecutivamente en bd, sin dejar espacios vacíos (ej: 1,2,3,4...)
+            if(empty($endpointsCount)) $endpointsCount = 3; // Si falla el llamado, lo seteo a 3 por default
+
+            $urlId = ($urlId + 1) % ($endpointsCount['response']);  // Aplico el modulo al urlId + 1     
+            // Si da 0, lo seteo a la cantidad de endpoints. 
+            // Esto soluciona el caso del modulo que da 0 y nunca se repetirán los urlIds
+            if($urlId === 0) $urlId = $endpointsCount['response'];       
 
             // Obtengo el rpc
             $rpcInfo = getRPC($urlId);
@@ -124,8 +128,8 @@
         futuro la forma en que se toma
         */
         function getAdminMail() {
-            return "cosarandom77@gmail.com"; // Seteado para hacer pruebas
-            //return "cmarchese@comunyt.com";
+            //return "cosarandom77@gmail.com"; // Seteado para hacer pruebas
+            return "cmarchese@comunyt.com";
     }
 
     /* email($emailAddress,$titulo,$contenido)
@@ -250,7 +254,7 @@
         $emailSentPreviouslyToSetAll = $emailSent;
         $response = post("setAll",$_POST);
         if ($response["success"] == false) {
-            email(getAdminMail(),"Problema: set request en DB fallo",$response);
+            email(getAdminMail(),"Problema: set request en DB fallo",json_encode($response));
         } else {
             $response["response"] = json_decode($response["response"],true);
             $id = $response["response"]["response"]["id"];
@@ -273,7 +277,7 @@
                 $response["status"] = "wrongData";            
                 $response["response"] = post("updateStatusById",$response);
                 if ($response["response"]["success"] == false) {
-                    email(getAdminMail(),"Problema ".$id.": update to wrongData status in en DB failed",$response);
+                    email(getAdminMail(),"Problema ".$id.": update to wrongData status in en DB failed",json_encode($response));
                 }
             }
 
@@ -288,15 +292,15 @@
         }
 
         // Realizo un call al verifier del relayer para saber si se puede ejecutar o no y ahorrar gas ante falta de permisos
-        // la parte del retry aun no está probada
         $aux = $response["response"];
         $response = verify(getRelayerAddress(),$aux);
         $maxRetries=maxRetries();//10;
         $retriesByEndpoint = retriesByEndpoint();//4;
         for($i=1; $response["success"]==false && $i<=$retriesByEndpoint && $maxRetries>0; $i++) { //14 segundos con cada uno
             if($i==$retriesByEndpoint) {
+                // Sumo RPCCalls si hay alguna call exitosa para actualizar
                 if ($endpointRPCalls > 0) updateRPCCalls();
-                updateRequestRetries();
+                updateRequestRetriesAndMisses(); // Actualizo los retires y misses del rpc
                 changeRPC();
                 $micro_seconds = 0;
                 $i=1;
@@ -309,17 +313,38 @@
             $endpointRPCRetries++;
         }
 
+        // Actualizo los endpointsCalls antes de entrar a los retrys de send
+        if ($endpointRPCalls > 0) updateRPCCalls();
+
         // Informo si hubo un error con la verificación. Esto si hay que ponerlo en el log o hacer retries
         if( isset($response["response"]) ) {
             // Informo si tiene permiso o no para ejecutar y solo mando si lo tiene para ahorrar gas.
             if($response["response"]!=false) {
+
                 // cambio el selector de verify al de execute y envío la transaccion para que se ejecute
                 $excSelector = getExecuteSelector();
-                $response["response"] = str_replace($verSelector,$excSelector,$response["response"]);
-                $response = send(getRelayerAddress(),$response["response"]);
+                $selector = str_replace($verSelector,$excSelector,$response["response"]);
+                $response = send(getRelayerAddress(),$selector);
+
+                // Hago retries si falló el send del RPC
+                $maxRetries = maxRetries();
+                for($i=1; $response["success"]==false && $i<=$retriesByEndpoint && $maxRetries>0; $i++) { 
+                    if($i == $retriesByEndpoint){
+                        if($endpointRPCalls > 0) updateRPCCalls();
+                        updateRequestRetriesAndMisses();
+                        changeRPC();
+                        $micro_seconds = 0;
+                        $i = 1;
+                    } else {
+                        $micro_seconds = 1000000 * $i + mt_rand(0, 1000000);
+                    }
+                    usleep($micro_seconds);
+                    $response = send(getRelayerAddress(),$selector);
+                    $maxRetries--;
+                    $endpointRPCRetries++;
+                }
 
                 // faltan los reintentos y obviamente comprobacion de error final
-
                 if($response["success"]==true) {
                     $response["txHash"] = $response["response"];
                 }else {
@@ -332,20 +357,21 @@
                     $response["post"] = post("updateStatusById",$response);
                     $response["post"] = post("updateTxHashById",$response);
                     if ($response["post"]["success"] == false) {
-                        email(getAdminMail(),"Problema ".$id.": update to success status in DB failed",$response);
+                        email(getAdminMail(),"Problema ".$id.": update to success status in DB failed",json_encode($response));
                     }
                 } else { // comprobado
                     $response["status"] = "sentFailed";
                     $response["post"] = post("updateStatusById",$response);
-                    email(getAdminMail(),"Problema ".$id.": sentFailed",$response);
+                    email(getAdminMail(),"Problema ".$id.": sentFailed",json_encode($response));
                 }
+
             }else { //comprobado
                 // si no coincide la firma con el mensaje
                 $response["success"] = false;
                 $response["msg"]="Not the signer";
                 $response["status"] = "signerFailure";
                 $response["post"] = post("updateStatusById",$response);
-                email(getAdminMail(),"Problema ".$id.": signerFailure",$response);
+                email(getAdminMail(),"Problema ".$id.": signerFailure",json_encode($response));
             }
         }else { //comprobado
             // si fallo la funcion verificar por algun error (en el nodo por ejemplo)
@@ -353,7 +379,7 @@
             $response["msg"]="We could not verified. Try again latter";
             $response["status"] = "RPCnodeFailure";
             $response["post"] = post("updateStatusById",$response);
-            email(getAdminMail(),"Problema ".$id.": RPCnodeFailure",$response);
+            email(getAdminMail(),"Problema ".$id.": RPCnodeFailure",json_encode($response));
         }
         //Imprimo el resultado, ya sea el hash creado o los mensajes de errores que se propagaron
         // esto si debo ponerlo en el log e incluso hacer el retry.
@@ -363,7 +389,7 @@
 
         // Si la suma da mayor a 0, actualizo, luego verifico cual tengo que actualizar.
         if(($endpointRPCRetries + $endpointRPCMisses) > 0){
-            updateRequestRetries();
+            updateRequestRetriesAndMisses();
         }
 
         // Verifico si se envió algún email luego del setAll, para setear el campo emailSent
@@ -467,10 +493,10 @@
         $endpointRPCConsecutiveMisses = 0;
     }
 
-    /* updateRequestRetries()
+    /* updateRequestRetriesAndMisses()
         Actualizo los retries del rpc que se uso para la request
     */
-    function updateRequestRetries()
+    function updateRequestRetriesAndMisses()
     {
         global $endpointRPCRetries;
         global $endpointRPCMisses;
@@ -706,17 +732,17 @@
         */
         function getNonce() {
             global $sweb3;
-            $blockchainNonce = $sweb3->personal->getNonce();    // BigInteger (de libreria math)
+            $blockchainNonce = intval($sweb3->personal->getNonce()->toString());    // BigInteger (de libreria math)
             $from = $sweb3->personal->address;   // Obtiene el address de la billetera relay
 
-            $response = getNonceFromDatabase(intval($blockchainNonce->toString()) /* Eliminar luego este param */);
+            $response = getNonceFromDatabase($blockchainNonce); /* Eliminar luego este param */
             if($response['success'] === false || empty($response)){
                 email(getAdminMail(), 'Problema: Error en getNonce al buscar el nonce del address en BD',  'Respuesta de base de datos: ' . $response . ' | El from que falló fue: ' . $from);
             } else {
                 $dbNonce = $response['response'] + 1;
-                if(intval($blockchainNonce->toString()) > ($dbNonce)){
+                if(intval($blockchainNonce) > ($dbNonce)){
                     $higherNonce = $blockchainNonce;
-                    email(getAdminMail(), 'Problema crítico: El nonce de la blockchain es superior al nonce de la base de datos', 'Blockchain nonce: ' . $blockchainNonce->toString() . ' | BD nonce: ' . $response['response']);
+                    email(getAdminMail(), 'Problema crítico: El nonce de la blockchain es superior al nonce de la base de datos', 'Blockchain nonce: ' . $blockchainNonce . ' | BD nonce: ' . $response['response']);
                 } else {
                     $higherNonce = $dbNonce;
                 }
@@ -725,8 +751,8 @@
             //! Por ahora devuelvo el nonce de la blockchain, luego obtenemos el de la API aux.
             //Retorno el mayor. Compruebo si setá seteado el mayor, si no devuelvo el de la blockchain.
             // if(isset($higherNonce)) return $higherNonce;
-            // else return intval($blockchainNonce->toString());
-            return intval($blockchainNonce->toString());
+            // else return $blockchainNonce;
+            return $blockchainNonce;
     }
 
     function getNonceFromDatabase($nonce /* Esto se debe borrar cuando se implemente bien */){
@@ -927,7 +953,7 @@
             'Problema: Hay uno o más RPCs con fallas', 
             "Se encontraron RPCs que están fallando, poseen $consecutiveMissQuantity o más de consecutiveMiss 
             (fallas consecutivas) y $notReportedTime hs sin que se haya reportado. Toma las acciones necesarias con estos rpcs. 
-            Estos son los RPCs que están fallando: " . $response);
+            Estos son los RPCs que están fallando: " . json_encode($response));
 
             // Actualizo los date reported de los endpoints que cumplen estas características
             // Lo hago sólo si envió el correo correctamente

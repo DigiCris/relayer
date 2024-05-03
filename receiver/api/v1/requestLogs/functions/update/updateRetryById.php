@@ -19,13 +19,14 @@ function updateRetryById($id, $retry) {
     $information = new requestLogs();
     $success['response'] = $information->readId($id);
     $success['response'] = $success['response'][0];
+    $expectedRetries = $success['response']['retry'] + $retry;
 
     if($success['response']['id'] == $id) {
         $information->set_retry($retry);
         $success['response'] = $information->updateRetryById($id);
         $success['response'] = $information->readId($id);
         $success['response'] = $success['response'][0];
-        if($success['response']['retry'] == $retry) {
+        if($success['response']['retry'] == $expectedRetries) {
             $success['success'] = true;
             $success['msg'] = 'Updated.';
         }else {
