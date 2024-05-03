@@ -453,7 +453,6 @@
         // Envia las calls que se almacenaron para el RPC que se estaba usando.
         $response = postRelayerRPC('updateCallsById', ['calls' => $endpointRPCalls, 'id' => $urlId, 'method' => 'updateCallsById']);
         
-        // Lo dejo comentado ya que como se usa en los retrys, si falla quizas enviariamos muchos correos para notificar el error. 
         if(empty($response) || $response['success'] == false){
             email(getAdminMail(), 'Problema: Fallo al actualizar las calls', 'Hubo un problema al intentar actualizar las calls del endpointRPC ' . $urlId . '. Se hicieron ' . $endpointRPCalls . ' calls. Respuesta de bd: ' . json_encode($response));
         }
@@ -482,7 +481,6 @@
         // 1. Actualizo los retrys
         if($endpointRPCRetries > 0){
             $response = postRequestLogs('updateRetryById', ['method' => 'updateRetryById', 'id' => $id, 'retry' => $endpointRPCRetries]);
-            // Lo dejo comentado ya que como se usa en los retrys, si falla quizas enviariamos muchos correos para notificar el error. 
             if(empty($response) || $response['success'] == false){
                 email(getAdminMail(), 'Problema: Fallo al actualizar los retrys del RPC usado en la request', 'Se hicieron ' . $endpointRPCRetries . ' retries. Id de la request: ' . $id . '. BD response: ' . json_encode($response));
             }
@@ -912,7 +910,7 @@
     }
 
     /* report()
-        1. Envia un email avisando que el consecutiveMiss es mayor a 10 y dateReported es mayor a 6hs.
+        1. Envia un email avisando que el consecutiveMiss es mayor a 10 y dateReported es mayor a X hs.
             Cuando mando el email, hago un update del dateReported
 
         2. Si solo 1 endpoint no tiene consecutiveMiss (o todos lo tienen), tambien informarlo por email.
@@ -925,11 +923,17 @@
 
         if(!empty($response) && $response['success'] == true){
             // se encontraron rpcs para reportar, así que mando un email.
-            email(getAdminMail(), 
+            $sent = email(getAdminMail(), 
             'Problema: Hay uno o más RPCs con fallas', 
             "Se encontraron RPCs que están fallando, poseen $consecutiveMissQuantity o más de consecutiveMiss 
             (fallas consecutivas) y $notReportedTime hs sin que se haya reportado. Toma las acciones necesarias con estos rpcs. 
             Estos son los RPCs que están fallando: " . $response);
+
+            // Actualizo los date reported de los endpoints que cumplen estas características
+            // Lo hago sólo si envió el correo correctamente
+            if($sent['http_code'] == 200 || $sent['http_code'] == 201){
+                postRelayerRPC('updateDateReportedForNotWorkingRPCs', ['method' => 'updateDateReportedForNotWorkingRPCs', 'consecutiveMissQuantity' => $consecutiveMissQuantity, 'notReportedTime' => $notReportedTime]);
+            }
         }
         return;
     }

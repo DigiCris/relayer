@@ -1302,7 +1302,22 @@ function postFunctions($post) {
                 ];
                 break;
             }
+            include_once "functions/update/resetConsecutiveMiss.php";
             $result = resetConsecutiveMiss($post['id']);
+            break;
+
+        case 'updateDateReportedForNotWorkingRPCs':
+            if(!isset($post['consecutiveMissQuantity'])){
+                $result = ['success' => false, 'msg' => 'No consecutiveMissQuantity provided'];
+                break;
+            }
+            if(!isset($post['notReportedTime'])){
+                $result = ['success' => false, 'msg' => 'No notReportedTime provided'];
+                break;
+            }
+
+            include_once "functions/update/updateDateReportedForNotWorkingRPCs.php";
+            $result = updateDateReportedForNotWorkingRPCs($post['consecutiveMissQuantity'], $post['notReportedTime']);
             break;
         
         default:

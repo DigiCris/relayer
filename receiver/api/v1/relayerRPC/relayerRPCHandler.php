@@ -898,6 +898,24 @@ class relayerRPC
         return $row;
     }
 
+    // Actualiza los rpcs que no funcionan y están sin reportar
+    public function updateDateReportedForNotWorkingRPCs($consecutiveMissQuantity, $hourTime)
+    {
+        $query = 'UPDATE relayerRPC SET dateReported = :dateReported
+        WHERE consecutiveMiss >= :consecutiveMissQuantity 
+        AND dateReported <= DATE_SUB(NOW(), INTERVAL :hourTime HOUR)';
+
+        $result = $this->base->prepare($query);
+        $consecutiveMissQuantity = htmlentities(addslashes($consecutiveMissQuantity));
+        $hourTime = htmlentities(addslashes($hourTime));
+        $result->bindValue(':dateReported', date('Y-m-d H:i:s'));   // Actual date and time
+        $result->bindValue(':consecutiveMissQuantity', $consecutiveMissQuantity);
+        $result->bindValue(':hourTime', $hourTime);
+        $success = $result->execute();
+        $result->closeCursor();
+        return $success;
+    }
+
 
 
 /*!

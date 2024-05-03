@@ -2,7 +2,6 @@
 
 include_once 'relayerRPCHandler.php';
 
-
 function resetConsecutiveMiss($id)
 {
     $rpc = new relayerRPC();
@@ -23,7 +22,7 @@ function resetConsecutiveMiss($id)
     }
 
     $updated = $rpc->readId($id);
-    if($updated[0]['consecutiveMiss'] === 0){
+    if($updated[0]['consecutiveMiss'] == 0){
         return [
             'success' => true,
             'msg' => 'rpc consecutiveMiss has been reset'
