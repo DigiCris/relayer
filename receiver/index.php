@@ -21,7 +21,8 @@
     $endpointRPCalls = 0;
     $emailSent = false;
     $endpointRPCRetries = 0;
-    $endpointRPCMiss = 0;
+    $endpointRPCMisses = 0;
+    $endpointRPCConsecutiveMisses = 0;
     /*
     getRPC($urlId);
     exit;
@@ -123,13 +124,12 @@
         futuro la forma en que se toma
         */
         function getAdminMail() {
-            //return "cosarandom77@gmail.com"; // Seteado para hacer pruebas
-            return "cmarchese@comunyt.com";
+            return "cosarandom77@gmail.com"; // Seteado para hacer pruebas
+            //return "cmarchese@comunyt.com";
     }
 
     /* email($emailAddress,$titulo,$contenido)
         Manda al emailAddress un email con el titulo en el asunto y el contenido adentro.
-        Falta implementar. Pedirle a Nico.
         */
     function email($emailAddress, $titulo, $contenido) {
         global $emailSent;
@@ -207,7 +207,7 @@
         if(isset($endpointsCount) || !empty($endpointsCount)){
             return $endpointsCount * retriesByEndpoint();
         } else {
-            // Si por algun motivo falla el hecho de botener el endpointsCount, retorno 10 por defecto
+            // Si por algun motivo falla el hecho de obtener el endpointsCount, retorno 10 por defecto
             return 10;
         }
     }
@@ -228,7 +228,10 @@
         global $id;
         global $nonce;
         global $emailSent;
+        global $endpointRPCalls;
         global $endpointRPCRetries;
+        global $endpointRPCMisses;
+        global $endpointRPCConsecutiveMisses;
 
         // obtengo los datos que se mandan con la firma para relayar
         $dataReceived = receiveData();  
@@ -238,7 +241,7 @@
             exit;
         }
 
-        // creo el campo data que se le va a mandar al relayer con los paramentros que vienen del post
+        // creo el campo data que se le va a mandar al relayer con los parametros que vienen del post
         $verSelector = getVerifierSelector();
         $_POST["selector"] = $verSelector;
         //$_POST["selector"] = $_POST["selector"].'1'; // probando mal funcionamiento de createDatastring
@@ -292,7 +295,7 @@
         $retriesByEndpoint = retriesByEndpoint();//4;
         for($i=1; $response["success"]==false && $i<=$retriesByEndpoint && $maxRetries>0; $i++) { //14 segundos con cada uno
             if($i==$retriesByEndpoint) {
-                updateRPCCalls();
+                if ($endpointRPCalls > 0) updateRPCCalls();
                 updateRequestRetries();
                 changeRPC();
                 $micro_seconds = 0;
@@ -356,10 +359,10 @@
         // esto si debo ponerlo en el log e incluso hacer el retry.
 
         // Sumo las calls hechas
-        updateRPCCalls();
+        if($endpointRPCalls > 0) updateRPCCalls();
 
-        // Sumo los retrys de la request si es mayor a 0
-        if($endpointRPCRetries > 0){
+        // Si la suma da mayor a 0, actualizo, luego verifico cual tengo que actualizar.
+        if(($endpointRPCRetries + $endpointRPCMisses) > 0){
             updateRequestRetries();
         }
 
@@ -367,6 +370,10 @@
         if($emailSentPreviouslyToSetAll == false && $emailSent == true){
             postRequestLogs('updateEmailSentById', ['method' => 'updateEmailSentById', 'emailSent' => $emailSent, 'id' => $id]);
         }
+
+        // Genero el reporte de consecutiveMisses. 
+        // Busco si hay algún RPC que está cumpliendo las características para que se genere el reporte.
+        report();
 
         // Paso el response por el wrapper
         $response = wrapper($response);
@@ -381,15 +388,12 @@
         por el de ejecución para hacer la llamada al mentodo send)
         */
         function verify($to, $data) {
-            global $endpointRPCalls;
             $responseAux = call($to,$data);
             if($responseAux["success"]==false) {
                 $response["success"] = false;
                 $response["msg"]="We could not verify. Try again latter";
                 return $response;
             }
-
-            $endpointRPCalls++; // Sumo calls
 
             $r = json_encode($responseAux["response"], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             $r = json_decode($r,true);
@@ -444,16 +448,24 @@
     {
         global $urlId;
         global $endpointRPCalls;
+        global $endpointRPCConsecutiveMisses;
+        
         // Envia las calls que se almacenaron para el RPC que se estaba usando.
         $response = postRelayerRPC('updateCallsById', ['calls' => $endpointRPCalls, 'id' => $urlId, 'method' => 'updateCallsById']);
         
         // Lo dejo comentado ya que como se usa en los retrys, si falla quizas enviariamos muchos correos para notificar el error. 
-        // if(empty($response) || $response['success'] == false){
-        //     email(getAdminMail(), 'Problema: Fallo al actualizar las calls', 'Hubo un problema al intentar actualizar las calls del endpointRPC ' . $urlId . '. Se hicieron ' . $endpointRPCalls . ' calls. Respuesta de bd: ' . json_encode($response));
-        // }
-        
+        if(empty($response) || $response['success'] == false){
+            email(getAdminMail(), 'Problema: Fallo al actualizar las calls', 'Hubo un problema al intentar actualizar las calls del endpointRPC ' . $urlId . '. Se hicieron ' . $endpointRPCalls . ' calls. Respuesta de bd: ' . json_encode($response));
+        }
+
+        // Reseteo los consecutive miss
+        $response2 = postRelayerRPC('resetConsecutiveMissById', ['method' => 'resetConsecutiveMissById', 'id' => $urlId]);
+        if(empty($response2) || $response2['success'] == false){
+            email(getAdminMail(), 'Problema: Fallo al resetear las consecutiveMiss', 'Hubo un problema al intentar actualizar los consecutiveMiss del endpointRPC ' . $urlId . '. Respuesta de bd: ' . json_encode($response2));
+        }
         // Las vuelvo a 0 porque quizás luego cambia el RPC
         $endpointRPCalls = 0;   
+        $endpointRPCConsecutiveMisses = 0;
     }
 
     /* updateRequestRetries()
@@ -462,22 +474,42 @@
     function updateRequestRetries()
     {
         global $endpointRPCRetries;
+        global $endpointRPCMisses;
+        global $endpointRPCConsecutiveMisses;
         global $id;
         global $urlId;
 
         // 1. Actualizo los retrys
-        $response = postRequestLogs('updateRetryById', ['method' => 'updateRetryById', 'id' => $id, 'retry' => $endpointRPCRetries]);
+        if($endpointRPCRetries > 0){
+            $response = postRequestLogs('updateRetryById', ['method' => 'updateRetryById', 'id' => $id, 'retry' => $endpointRPCRetries]);
+            // Lo dejo comentado ya que como se usa en los retrys, si falla quizas enviariamos muchos correos para notificar el error. 
+            if(empty($response) || $response['success'] == false){
+                email(getAdminMail(), 'Problema: Fallo al actualizar los retrys del RPC usado en la request', 'Se hicieron ' . $endpointRPCRetries . ' retries. Id de la request: ' . $id . '. BD response: ' . json_encode($response));
+            }
+        }
 
-        // 2. Actualizo los miss (va a ser igual a los retrys, ya que cada vez que se suma un retry, es porque hubo un miss)
-        $response2 = postRelayerRPC('updateMissById', ['method' => 'updateMissById', 'id' => $urlId, 'miss' => $endpointRPCRetries]);
+        // 2. Actualizo los misses
+        if($endpointRPCMisses > 0){
+            $response2 = postRelayerRPC('updateMissById', ['method' => 'updateMissById', 'id' => $urlId, 'miss' => $endpointRPCMisses]);
 
-        // Lo dejo comentado ya que como se usa en los retrys, si falla quizas enviariamos muchos correos para notificar el error. 
-        // if(empty($response) || $response['success'] == false){
-        //     email(getAdminMail(), 'Problema: Fallo al actualizar los retrys del RPC usado en la request', 'Se hicieron ' . $endpointRPCRetries . '. Id de la request: ' . $id);
-        // }
+            if(empty($response2) || $response2['success'] == false){
+                email(getAdminMail(), 'Problema: Fallo al actualizar los misses del RPC usado en la request', 'Se hicieron ' . $endpointRPCMisses . ' misses. Id de la request: ' . $id . '. BD response: ' . json_encode($response2));
+            }
+        }
+
+        // 3. Actualizo los consecutiveMisses
+        if($endpointRPCConsecutiveMisses > 0){
+            $response3 = postRelayerRPC('updateConsecutiveMissById', ['method' => 'updateConsecutiveMissById', 'id' => $urlId, 'consecutiveMiss' => $endpointRPCConsecutiveMisses]);
+
+            if(empty($response3) || $response3['success'] == false){
+                email(getAdminMail(), 'Problema: Fallo al actualizar los consecutiveMisses del RPC usado en la request', 'Se hicieron ' . $endpointRPCConsecutiveMisses . ' consecutiveMisses. Id de la request: ' . $id . json_encode($response3));
+            }
+        }
 
         // Reseteo los retries
         $endpointRPCRetries = 0;
+        $endpointRPCMisses = 0;
+        $endpointRPCConsecutiveMisses = 0;
     }
 
     /* getRPCByLowerOrderVal()
@@ -717,6 +749,8 @@
             global $nonce; // es una variable global para caluclarlo una sola vez y ahorrar llamados al RPC
             global $sweb3;
             global $endpointRPCalls;
+            global $endpointRPCMisses;
+            global $endpointRPCConsecutiveMisses;
             global $urlId;
             $sendParams = [
                 'from' =>    $sweb3->personal->address,
@@ -731,6 +765,9 @@
             $result = $sweb3->send($sendParams);
             $error = serialize($result);
             if (strpos($error, 'rror') > 0) {
+                $endpointRPCMisses++; // Sumo 1 a misses
+                if($endpointRPCMisses > 1) $endpointRPCConsecutiveMisses++;
+
                 $response["success"] = false;
                 $response["msg"] = "error: 1) data not sent to blockchain: ". $error;
                 return $response;
@@ -738,6 +775,7 @@
 
             // Sumo calls
             $endpointRPCalls++;
+            $endpointRPCConsecutiveMisses = 0;
 
             $response["success"] = true;
             $response["msg"] = "sent successfully to blockchain";
@@ -746,6 +784,9 @@
     
         } catch (Exception $e) {
             // Capturar cualquier excepción ocurrida durante la ejecución
+            $endpointRPCMisses++; // Sumo 1 a misses
+            if($endpointRPCMisses > 1) $endpointRPCConsecutiveMisses++;
+
             $response["success"] = false;
             $response["msg"] = "error: 2) data not sent to blockchain: " . $e->getMessage();
             return $response;
@@ -820,6 +861,9 @@
             global $sweb3;
             global $nonce; // es una variable global para calcularlo una sola vez y ahorrar llamados al RPC
             global $endpointRPCalls;
+            global $endpointRPCMisses;
+            global $endpointRPCConsecutiveMisses;
+
             $callParams = [
                 [
                     'to' => $to,
@@ -828,12 +872,13 @@
                 'latest'
             ];
     
-            // Sumo calls
-            $endpointRPCalls++;
             $result = $sweb3->call('eth_call', $callParams);
     
             $error = serialize($result);
             if (strpos($error, 'rror') > 0) {
+                $endpointRPCMisses++;
+                if($endpointRPCMisses > 1) $endpointRPCConsecutiveMisses++;
+
                 $response["success"] = false;
                 $response["msg"] = "error: call 1) data not sent to blockchain: " . $error;
                 return $response;
@@ -842,6 +887,10 @@
             $response["success"] = true;
             $response["msg"] = "call successful";
             $response["response"] = $result;
+
+            // Sumo calls
+            $endpointRPCalls++;
+            $endpointRPCConsecutiveMisses = 0;
             return $response;
     
         } catch (Exception $e) {
@@ -852,6 +901,16 @@
         }
     }
 
+    // Cantidad de consecutiveMiss para buscar
+    function getConsecutiveMissQuantityToReport(){
+        return 10;  //10 consecutiveMiss o más
+    }
+
+    // Cantidad de tiempo que tiene que pasar para que se informe
+    function getNotReportedTimeToReport(){
+        return 6; // 6hs o más
+    }
+
     /* report()
         1. Envia un email avisando que el consecutiveMiss es mayor a 10 y dateReported es mayor a 6hs.
             Cuando mando el email, hago un update del dateReported
@@ -860,6 +919,18 @@
     */
     function report()
     {
+        $consecutiveMissQuantity = getConsecutiveMissQuantityToReport();
+        $notReportedTime = getNotReportedTimeToReport();
+        $response = get("https://comunyt.co/relayer/api/v1/relayerRPC/getNotReportedRPCs/$consecutiveMissQuantity/$notReportedTime");
+
+        if(!empty($response) && $response['success'] == true){
+            // se encontraron rpcs para reportar, así que mando un email.
+            email(getAdminMail(), 
+            'Problema: Hay uno o más RPCs con fallas', 
+            "Se encontraron RPCs que están fallando, poseen $consecutiveMissQuantity o más de consecutiveMiss 
+            (fallas consecutivas) y $notReportedTime hs sin que se haya reportado. Toma las acciones necesarias con estos rpcs. 
+            Estos son los RPCs que están fallando: " . $response);
+        }
         return;
     }
 

@@ -190,6 +190,19 @@ function getFunctions($get) {
             $result = getEndpointsCount();
             debug('getEndpointsCount');
             break;
+
+        case 'getNotReportedRPCs':
+            if(!isset($get['consecutiveMissQuantity'])){
+                $result = ['success' => false, 'msg' => 'No consecutiveMissQuantity provided'];
+                break;
+            }
+            if(!isset($get['notReportedTime'])){
+                $result = ['success' => false, 'msg' => 'No notReportedTime provided'];
+                break;
+            }
+            include_once "functions/read/getNotReportedRPCs.php";
+            $result = getNotReportedRPCs($get['consecutiveMissQuantity'], $get['notReportedTime']);
+            break;
         default:
             $result['success']=false;
             $result['msg']='No valid get case selected';
@@ -1279,6 +1292,17 @@ function postFunctions($post) {
                 break;
             }
             $result = updateDateReportedByConsecutiveMiss($post['consecutiveMiss'],$post['dateReported']);
+            break;
+
+        case 'resetConsecutiveMissById':
+            if(!isset($post['id'])){
+                $result = [
+                    'success' => false,
+                    'msg' => 'No id provided'
+                ];
+                break;
+            }
+            $result = resetConsecutiveMiss($post['id']);
             break;
         
         default:

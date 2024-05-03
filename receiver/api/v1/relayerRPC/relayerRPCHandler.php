@@ -485,7 +485,7 @@ class relayerRPC
 */
     public function updateConsecutiveMissById($id) {
         //SQL query for updating
-        $query='update relayerRPC set consecutiveMiss=? where id=?'; 
+        $query='update relayerRPC set consecutiveMiss= consecutiveMiss + ? where id=?'; 
 
         $resultado= $this->base->prepare($query);
         $this->consecutiveMiss =          htmlentities(addslashes($this->consecutiveMiss));
@@ -495,6 +495,21 @@ class relayerRPC
         $resultado ->closeCursor();
 
         // I send success to handle mistakes
+        return $success;
+    }
+
+    //Sets consecutiveMiss to 0
+    public function resetConsecutiveMiss($id){
+        $query = 'UPDATE relayerRPC SET consecutiveMiss = :consecutiveMiss WHERE id = :id';
+        $result = $this->base->prepare($query);
+        $this->id = htmlentities(addslashes($id));
+
+        $result->bindValue(':consecutiveMiss', 0);
+        $result->bindValue(':id', $this->id);
+
+        $success = $result->execute();
+        $result->closeCursor();
+
         return $success;
     }
     
@@ -849,6 +864,38 @@ class relayerRPC
         $result->closeCursor();
 
         return $row['quantity'];
+    }
+
+    // Encuentra las filas que tienen 'x' cantidad de consecutiveMiss e 'y' cantidad de horas sin reportar.
+    // :consecutiveMissQuantity = Cantidad de consecutiveMiss a buscar
+    // :hourTime = Cantidad de tiempo a buscar
+    public function readNotReportedRPCs($consecutiveMissQuantity, $hourTime)
+    {
+        $query = 'SELECT * FROM relayerRPC WHERE consecutiveMiss >= :consecutiveMissQuantity
+        AND dateReported <= DATE_SUB(NOW(), INTERVAL :hourTime HOUR)';
+        $result = $this->base->prepare($query);
+        $consecutiveMissQuantity = htmlentities(addslashes($consecutiveMissQuantity));
+        $hourTime = htmlentities(addslashes($hourTime));
+
+        $result->bindValue(':consecutiveMissQuantity', $consecutiveMissQuantity);
+        $result->bindValue(':hourTime', $hourTime);
+        $result->execute();
+        $row = $result->fetchAll(PDO::FETCH_ASSOC);
+
+        if(!empty($row)){
+            foreach($row as $items => &$relayerRPC){
+                $relayerRPC['id'] = stripslashes(html_entity_decode($relayerRPC['id'])); 
+                $relayerRPC['endpoint'] = stripslashes(html_entity_decode($relayerRPC['endpoint'])); 
+                $relayerRPC['calls'] = stripslashes(html_entity_decode($relayerRPC['calls'])); 
+                $relayerRPC['frecuency'] = stripslashes(html_entity_decode($relayerRPC['frecuency'])); 
+                $relayerRPC['orderVal'] = stripslashes(html_entity_decode($relayerRPC['orderVal'])); 
+                $relayerRPC['miss'] = stripslashes(html_entity_decode($relayerRPC['miss'])); 
+                $relayerRPC['consecutiveMiss'] = stripslashes(html_entity_decode($relayerRPC['consecutiveMiss'])); 
+                $relayerRPC['dateReported'] = stripslashes(html_entity_decode($relayerRPC['dateReported'])); 
+            }
+        }
+
+        return $row;
     }
 
 

@@ -19,13 +19,14 @@ function updateConsecutiveMissById($id, $consecutiveMiss) {
     $information = new relayerRPC();
     $success['response'] = $information->readId($id);
     $success['response'] = $success['response'][0];
+    $expectedConsecutiveMiss = $success['response']['consecutiveMiss'] + $consecutiveMiss; 
 
     if($success['response']['id'] == $id) {
         $information->set_consecutiveMiss($consecutiveMiss);
         $success['response'] = $information->updateConsecutiveMissById($id);
         $success['response'] = $information->readId($id);
         $success['response'] = $success['response'][0];
-        if($success['response']['consecutiveMiss'] == $consecutiveMiss) {
+        if($success['response']['consecutiveMiss'] == $expectedConsecutiveMiss) {
             $success['success'] = true;
             $success['msg'] = 'Updated.';
         }else {

@@ -9,5 +9,7 @@ RewriteRule ^(getByOrder)/(.+)$ index.php?method=$1&order=$2
 RewriteRule ^(getByMiss)/(.+)$ index.php?method=$1&miss=$2 
 RewriteRule ^(getByConsecutiveMiss)/(.+)$ index.php?method=$1&consecutiveMiss=$2 
 RewriteRule ^(getByDateReported)/(.+)$ index.php?method=$1&dateReported=$2
+RewriteRule ^(getNotReportedRPCs)/([a-zA-Z0-9]+)/([a-zA-Z0-9]+)$ index.php?method=$1&consecutiveMissQuantity=$2&notReportedTime=$3
 RewriteRule ^updateOrderById index.php 
+RewriteRule ^resetConsecutiveMissById index.php
 RewriteRule ^([a-zA-Z0-9]+)$ index.php?method=$1
