@@ -128,8 +128,8 @@
         futuro la forma en que se toma
         */
         function getAdminMail() {
-            //return "cosarandom77@gmail.com"; // Seteado para hacer pruebas
-            return "cmarchese@comunyt.com";
+            return "cosarandom77@gmail.com"; // Seteado para hacer pruebas
+            //return "cmarchese@comunyt.com";
     }
 
     /* email($emailAddress,$titulo,$contenido)
@@ -220,7 +220,7 @@
     }
 
     function getRelayerAddress() {
-        return '0x0f56EA91233eA958eA3820Ba0F94349aFD866833';
+        return ENV['CONTRATO_FORWARDER'];
     }
 
     /* relayTransaction()
@@ -351,14 +351,30 @@
                     $response["txHash"] = "gas problem";
                 }
                 
+                // El string contiene "0x" seguido de caracteres alfanuméricos
                 if (preg_match('/0x\w+/i', $response["txHash"])) {
-                    // El string contiene "0x" seguido de caracteres alfanuméricos
-                    $response["status"] = "success";
+                    // Scraping para comprobar si la transacción se realizó realmente o no
+                    // ciclo hasta que se ponga en success o de un execution reverted
+                    $scrapStatus = isExecutionReverted($response['txHash']);
+                    for($i=1; $scrapStatus === -1 && $i < scrapingLimit(); $i++){
+                        sleep(3);   // 3 seconds to retry
+                        $scrapStatus = isExecutionReverted($response['txHash']);
+                    }
+
+                    // Chequeo si esta en reverted o success
+                    if($scrapStatus === 1){
+                        $response["status"] = "executionReverted";
+                        $response["success"] = false;
+                    } else {
+                        $response["status"] = "success";
+                    }
+
                     $response["post"] = post("updateStatusById",$response);
                     $response["post"] = post("updateTxHashById",$response);
                     if ($response["post"]["success"] == false) {
                         email(getAdminMail(),"Problema ".$id.": update to success status in DB failed",json_encode($response));
                     }
+
                 } else { // comprobado
                     $response["status"] = "sentFailed";
                     $response["post"] = post("updateStatusById",$response);
@@ -405,6 +421,35 @@
         $response = wrapper($response);
         echo json_encode($response, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         exit;
+    }
+
+    function scrapingLimit(){
+        return 40;
+    }
+
+    function isExecutionReverted($txHash)
+    {
+        $host = explode('.', $_SERVER['HTTP_HOST']);
+        if(end($host) === '.com'){
+            // Mainnet
+            $scrapUrl = "https://polygonscan.com/tx/$txHash";
+        } else {
+            // Amoy
+            $scrapUrl = "https://amoy.polygonscan.com/tx/$txHash";
+        }
+        $html = file_get_contents($scrapUrl);
+
+        // Verifico si está en pending o en indexing
+        if(strpos($html, '(Pending)') === false && strpos($html, 'Indexing') === false) {
+            if(strpos($html, 'reverted') === false){
+                $status = 0;   // Not Reverted
+            } else {
+                $status = 1;   // Reverted
+            }
+        } else {
+            $status = -1; // Pending status
+        }
+        return $status;
     }
 
     /* verify($to, $data)
@@ -1111,6 +1156,10 @@
                 $response['status'] = 'canceled';
                 break;
         }
+        if(isset($response['txHash'])){
+            $response['result'] = ['txHash' => $response['txHash']];
+            $response['result'] = json_encode($response['result']);
+        }   
         return $response;
     }
 
